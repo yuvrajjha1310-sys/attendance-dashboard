@@ -12,8 +12,17 @@ def init_db():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
 
+    # users table
     c.execute("""
-    CREATE TABLE IF NOT EXISTS attendance(
+    CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        password TEXT
+    )
+    """)
+
+    # attendance table
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS attendance (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user TEXT,
         subject TEXT,
@@ -32,9 +41,42 @@ init_db()
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        session["user"] = request.form["username"]
-        return redirect("/dashboard")
+        username = request.form["username"]
+        password = request.form["password"]
+
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+        user = c.fetchone()
+        conn.close()
+
+        if user:
+            session["user"] = username
+            return redirect("/dashboard")
+        else:
+            return "Invalid credentials"
+
     return render_template("login.html")
+
+
+# ================= REGISTER =================
+@app.route("/register", methods=["POST"])
+def register():
+    username = request.form["username"]
+    password = request.form["password"]
+
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    try:
+        c.execute("INSERT INTO users VALUES (?, ?)", (username, password))
+        conn.commit()
+    except:
+        return "User already exists"
+
+    conn.close()
+    return redirect("/")
+
 
 # ================= DASHBOARD =================
 @app.route("/dashboard")
@@ -43,126 +85,13 @@ def dashboard():
         return redirect("/")
     return render_template("index.html", user=session["user"])
 
-# ================= SAVE =================
-@app.route("/save", methods=["POST"])
-def save():
-    if "user" not in session:
-        return jsonify({"success": False, "error": "Not logged in"})
 
-    try:
-        data = request.json
-        date = data["date"]
-        semester = data["semester"]
+# ================= LOGOUT =================
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
 
-        conn = sqlite3.connect(DB)
-        c = conn.cursor()
-
-        for index, status in data["data"].items():
-
-            subject = get_subject_by_index(int(index))
-
-            # delete old
-            c.execute("""
-            DELETE FROM attendance
-            WHERE user=? AND subject=? AND date=? AND semester=?
-            """, (session["user"], subject, date, semester))
-
-            # insert new
-            c.execute("""
-            INSERT INTO attendance (user, subject, date, status, semester)
-            VALUES (?, ?, ?, ?, ?)
-            """, (session["user"], subject, date, status, semester))
-
-        conn.commit()
-        conn.close()
-
-        return jsonify({"success": True})
-
-    except Exception as e:
-        print("ERROR:", e)
-        return jsonify({"success": False, "error": str(e)})
-
-# ================= SUBJECT MAP =================
-def get_subject_by_index(i):
-    subjects = [
-        "Introduction to Data Science",
-        "Digital Marketing",
-        "Software Testing",
-        "Operating System",
-        "Logical & Critical Thinking",
-        "Cyber Laws"
-    ]
-    return subjects[i] if i < len(subjects) else "Unknown"
-
-# ================= STATS =================
-@app.route("/stats")
-def stats():
-    semester = request.args.get("semester")
-    user = session.get("user")
-
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    c.execute("""
-    SELECT COUNT(DISTINCT date) FROM attendance
-    WHERE user=? AND semester=?
-    """, (user, semester))
-    total_days = c.fetchone()[0] or 0
-
-    c.execute("""
-    SELECT COUNT(*) FROM attendance
-    WHERE user=? AND semester=? AND status='P'
-    """, (user, semester))
-    present = c.fetchone()[0] or 0
-
-    c.execute("""
-    SELECT COUNT(*) FROM attendance
-    WHERE user=? AND semester=? AND status='A'
-    """, (user, semester))
-    absent = c.fetchone()[0] or 0
-
-    conn.close()
-
-    total = present + absent
-    percent = int((present / total) * 100) if total else 0
-
-    return jsonify({
-        "total_days": total_days,
-        "present": present,
-        "absent": absent,
-        "percentage": percent
-    })
-
-# ================= ANALYTICS =================
-@app.route("/analytics")
-def analytics():
-    semester = request.args.get("semester")
-    user = session.get("user")
-
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    c.execute("""
-    SELECT subject,
-           SUM(CASE WHEN status='P' THEN 1 ELSE 0 END),
-           SUM(CASE WHEN status='A' THEN 1 ELSE 0 END)
-    FROM attendance
-    WHERE user=? AND semester=?
-    GROUP BY subject
-    """, (user, semester))
-
-    rows = c.fetchall()
-    conn.close()
-
-    result = []
-    for r in rows:
-        result.append({
-            "subject": r[0],
-            "present": r[1],
-            "absent": r[2]
-        })
-
-    return jsonify(result)
 
 # ================= RUN =================
 if __name__ == "__main__":
