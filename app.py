@@ -19,6 +19,14 @@ def init_db():
         password TEXT
     )
     """)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    password TEXT
+)
+""")
+    c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", ("admin", "1234"))
 
     # attendance table
     c.execute("""
@@ -41,13 +49,15 @@ init_db()
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
+        username = request.form.get("username")
+        password = request.form.get("password")
 
         conn = sqlite3.connect(DB)
         c = conn.cursor()
+
         c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
         user = c.fetchone()
+
         conn.close()
 
         if user:
@@ -57,7 +67,6 @@ def login():
             return "Invalid credentials"
 
     return render_template("login.html")
-
 
 # ================= REGISTER =================
 @app.route("/register", methods=["POST"])
