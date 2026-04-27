@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Attendance Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="/static/style.css">
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</head>
+<body>
+
+<div class="container">
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+        <h2>Dashboard</h2>
+
+        <button onclick="showSection('dashboard')">Dashboard</button>
+        <button onclick="showSection('erp')">ERP View</button>
+        <button onclick="showSection('student')">Student Info</button>
+
+        <hr>
+
+        <input id="newSubject" placeholder="New subject">
+        <button onclick="addSubject()">Add</button>
+
+        <select id="deleteSubject"></select>
+        <button onclick="deleteSubject()">Delete</button>
+
+        <hr>
+
+        <label>Semester</label>
+        <select id="semesterSelect">
+            <option>Sem 1</option>
+            <option>Sem 2</option>
+            <option>Sem 3</option>
+            <option selected>Sem 4</option>
+            <option>Sem 5</option>
+            <option>Sem 6</option>
+        </select>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main">
+
+        <h1>Welcome, {{user}}</h1>
+
+        <!-- STATS -->
+        <div class="cards">
+            <div class="card">Total Days<br><span id="totalDays">0</span></div>
+            <div class="card">Present<br><span id="present">0</span></div>
+            <div class="card">Absent<br><span id="absent">0</span></div>
+            <div class="card">Attendance %<br><span id="percent">0%</span></div>
+        </div>
+
+        <!-- DASHBOARD -->
+        <div id="dashboard" class="section">
+            <div class="card">
+                <input type="date" id="date">
+                <div id="subjects"></div>
+                <button onclick="saveAttendance()">Save</button>
+            </div>
+        </div>
+
+        <!-- ERP -->
+        <div id="erp" class="section" style="display:none;">
+            <div class="card">
+                <h2>ERP Analytics</h2>
+                <canvas id="erpChart"></canvas>
+            </div>
+        </div>
+
+        <!-- STUDENT -->
+        <div id="student" class="section" style="display:none;">
+            <div class="card">
+                <h2>Student Info</h2>
+                <p>Name: {{user}}</p>
+                <p>Semester: <span id="currentSem">Sem 4</span></p>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+
+let subjects = [
+    "Introduction to Data Science",
+    "Digital Marketing",
+    "Software Testing",
+    "Operating System",
+    "Logical & Critical Thinking",
+    "Cyber Laws"
+];
+
+let chart;
+
+// ================= NAVIGATION =================
+function showSection(section) {
+    document.getElementById("dashboard").style.display = "none";
+    document.getElementById("erp").style.display = "none";
+    document.getElementById("student").style.display = "none";
+
+    document.getElementById(section).style.display = "block";
+
+    if(section === "erp") loadChart();
+}
+
+// ================= SUBJECT RENDER =================
+function renderSubjects() {
+    let html = "";
+
+    subjects.forEach((sub, i) => {
+        html += `
+        <div class="row">
+            ${sub}
+            <div>
+                <button onclick="toggle(this,'P')" class="btnP">P</button>
+                <button onclick="toggle(this,'A')" class="btnA">A</button>
+            </div>
+        </div>`;
+    });
+
+    document.getElementById("subjects").innerHTML = html;
+
+    // update delete dropdown
+    let select = document.getElementById("deleteSubject");
+    select.innerHTML = "";
+    subjects.forEach(s => {
+        select.innerHTML += `<option>${s}</option>`;
+    });
+}
+
+// ================= TOGGLE =================
+function toggle(btn, type) {
+    let parent = btn.parentElement;
+    let buttons = parent.querySelectorAll("button");
+
+    if (btn.classList.contains("active")) {
+        btn.classList.remove("active");
+        return;
+    }
+
+    buttons.forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+}
+
+// ================= SAVE =================
+async function saveAttendance() {
+    const date = document.getElementById("date").value;
+    const semester = document.getElementById("semesterSelect").value;
+
+    if (!date) {
+        alert("Select date");
+        return;
+    }
+
+    let data = {};
+
+    document.querySelectorAll(".row").forEach((row, i) => {
+        let p = row.querySelector(".btnP");
+        let a = row.querySelector(".btnA");
+
+        if (p.classList.contains("active")) data[i] = "P";
+        if (a.classList.contains("active")) data[i] = "A";
+    });
+
+    if (Object.keys(data).length === 0) {
+        alert("Mark at least one subject");
+        return;
+    }
+
+    const res = await fetch("/save", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({date, data, semester})
+    });
+
+    const result = await res.json();
+
+    if(result.success){
+        alert("Saved ✅");
+        loadStats();
+        loadChart();
+    } else {
+        alert("Error saving ❌: " + result.error);
+        console.error(result.error);
+    }
+}
+
+// ================= STATS =================
+async function loadStats() {
+    const semester = document.getElementById("semesterSelect").value;
+
+    const res = await fetch("/stats?semester=" + semester);
+    const data = await res.json();
+
+    document.getElementById("totalDays").innerText = data.total_days;
+    document.getElementById("present").innerText = data.present;
+    document.getElementById("absent").innerText = data.absent;
+    document.getElementById("percent").innerText = data.percentage + "%";
+
+    document.getElementById("currentSem").innerText = semester;
+}
+
+// ================= CHART =================
+async function loadChart() {
+    const semester = document.getElementById("semesterSelect").value;
+
+    const res = await fetch("/analytics?semester=" + semester);
+    const data = await res.json();
+
+    if (!data.length) return;
+
+    const labels = data.map(d => d.subject);
+    const present = data.map(d => d.present);
+    const absent = data.map(d => d.absent);
+
+    const ctx = document.getElementById("erpChart").getContext("2d");
+
+    if (chart) chart.destroy();
+
+    chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels,
+            datasets: [
+                { label: "Present", data: present, backgroundColor: "#22c55e" },
+                { label: "Absent", data: absent, backgroundColor: "#ef4444" }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    labels: { color: "white" }
+                }
+            },
+            scales: {
+                x: { ticks: { color: "white" } },
+                y: { ticks: { color: "white" }, beginAtZero: true }
+            }
+        }
+    });
+}
+
+// ================= SUBJECT MGMT =================
+function addSubject() {
+    const val = document.getElementById("newSubject").value;
+    if(val){
+        subjects.push(val);
+        renderSubjects();
+    }
+}
+
+function deleteSubject() {
+    const val = document.getElementById("deleteSubject").value;
+    subjects = subjects.filter(s => s !== val);
+    renderSubjects();
+}
+
+// ================= INIT =================
+renderSubjects();
+loadStats();
+
+document.getElementById("semesterSelect").addEventListener("change", () => {
+    loadStats();
+});
+
+</script>
+
+</body>
+</html>
